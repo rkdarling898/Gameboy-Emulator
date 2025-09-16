@@ -1,7 +1,64 @@
+#include <stdio.h>
+
+#include "common.h"
 #include "sm83.h"
 
-int main (int argc, char* argv[]) {
-    sm83_ctx ctx = {0};
+#define MEMORY_MAX 8388608
+#define ROM_GB 1
+#define ROM_GB_COLOR 2
+
+uint8_t gb_rom_type (char *filePath) {
+    int len = strlen(filePath);
+    char *ext2 = (char *)(filePath + len - 3);
+    char *ext3 = (char *)(filePath + len - 4);
+
+    if (strcmp(ext2, ".gb") == 0) {
+        return ROM_GB;
+    } else if (strcmp(ext3, ".gbc") == 0) {
+        return ROM_GB_COLOR;
+    }
 
     return 0;
+}
+
+void error (const char *msg) {
+    perror(msg);
+    exit(EXIT_FAILURE);
+}
+
+void print_usage (const char *program_name) {
+    // Just setting this up to potentially take some options and flags later on
+    printf("%s%s%s", "Usage: ", program_name, " (file.gb / file.gbc) [-o] [-f]\n");
+    exit(EXIT_SUCCESS);
+}
+
+int main (int argc, char *argv[]) {
+    sm83_ctx ctx = {0};
+    uint8_t rom_type = 0;
+    uint8_t *memory = NULL;
+    size_t rom_size = 0;
+    FILE *file = NULL;
+
+    if (argc == 1)
+        print_usage(argv[0]);
+
+    if ((rom_type = gb_rom_type(argv[1])) == 0)
+        print_usage(argv[0]);
+
+    if ((file = fopen(argv[1], "rb")) == NULL)
+        error("Unable to open file provided");
+
+    if (fseek(file, 0, SEEK_END) < 0 || (rom_size = ftell(file)) < 0)
+        error("Error occured getting ROM size");
+
+    memory = (uint8_t *)malloc(rom_size);
+
+    rewind(file);
+    fread(memory, 1, rom_size, file);
+
+    printf("ROM size: %zu\n", rom_size);
+
+    free(memory);
+
+    return EXIT_SUCCESS;
 }

@@ -1,4 +1,6 @@
-#include <stdint.h>
+#pragma once
+
+#include "common.h"
 
 typedef struct {
 	uint8_t rA;
