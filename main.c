@@ -1,6 +1,7 @@
 #include <stdio.h>
 
 #include "common.h"
+#include "cartridge_header.h"
 #include "sm83.h"
 
 #define MEMORY_MAX 8388608
@@ -34,6 +35,7 @@ void print_usage (const char *program_name) {
 
 int main (int argc, char *argv[]) {
     sm83_ctx ctx = {0};
+    cartridge_header cart_h = {0};
     uint8_t rom_type = 0;
     uint8_t *memory = NULL;
     size_t rom_size = 0;
@@ -56,7 +58,9 @@ int main (int argc, char *argv[]) {
     rewind(file);
     fread(memory, 1, rom_size, file);
 
-    printf("ROM size: %zu\n", rom_size);
+    store_c_header_data(memory, &cart_h);
+
+    print_c_header(&cart_h);
 
     free(memory);
 
