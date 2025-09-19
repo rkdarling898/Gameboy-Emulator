@@ -34,7 +34,7 @@ void print_usage (const char *program_name) {
 }
 
 int main (int argc, char *argv[]) {
-    sm83_ctx ctx = {0};
+    sm83_ctx cpu = {0};
     cartridge_header cart_h = {0};
     uint8_t rom_type = 0;
     uint8_t *memory = NULL;
@@ -60,7 +60,12 @@ int main (int argc, char *argv[]) {
 
     store_c_header_data(memory, &cart_h);
 
-    print_c_header(&cart_h);
+    cpu.is_running = true;
+
+    // Main Loop
+    while (cpu.is_running) {
+        next_instruction(&cpu, memory);
+    }
 
     free(memory);
 
