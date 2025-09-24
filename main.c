@@ -60,11 +60,13 @@ int main (int argc, char *argv[]) {
 
     store_c_header_data(memory, &cart_h);
 
+    cpu.sp = 0xFFFE;
     cpu.is_running = true;
 
     // Main Loop
     while (cpu.is_running) {
-        next_instruction(&cpu, memory);
+        printf("Running opcode 0x%02X\n", next_instruction(&cpu, memory));
+        //next_instruction(&cpu, memory);
     }
 
     free(memory);
