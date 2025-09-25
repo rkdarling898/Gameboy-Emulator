@@ -32,7 +32,6 @@ void write_to_bus (uint8_t *memory, uint16_t addr, uint8_t data) {
 }
 
 void ld_next_byte (sm83_ctx *cpu, uint8_t *memory, uint8_t *dest) {
-	cpu->pc++;
 	*dest = read_from_bus(memory, cpu->pc++);
 }
 
@@ -50,9 +49,28 @@ void push_to_stack (sm83_ctx *cpu, uint8_t *memory, uint16_t data) {
 uint8_t next_instruction (sm83_ctx *cpu, uint8_t *memory) {
 	uint8_t op_code = *(memory + cpu->pc);
 
+	cpu->pc++;
+
 	switch (op_code) {
 	case 0x00:
 		// NOP
+		break;
+	case 0x05:
+		// DEC B
+		set_bit_u8(&cpu->rB, SUBTRACTION_FLAG, true);
+
+		if (cpu->rB == 1) {
+			set_bit_u8(&cpu->rB, ZERO_FLAG, true);
+			set_bit_u8(&cpu->rB, HALF_CARRY_FLAG, false);
+		} else if (cpu->rB == 0) {
+			set_bit_u8(&cpu->rB, ZERO_FLAG, false);
+			set_bit_u8(&cpu->rB, HALF_CARRY_FLAG, true);
+		} else {
+			set_bit_u8(&cpu->rB, ZERO_FLAG, false);
+			set_bit_u8(&cpu->rB, HALF_CARRY_FLAG, false);
+		}
+
+		cpu->rB--;
 		break;
 	case 0x06:
 		// LD B, n8
@@ -64,22 +82,16 @@ uint8_t next_instruction (sm83_ctx *cpu, uint8_t *memory) {
 		break;
 	case 0x21:
 		// LD HL, n16
-		cpu->pc++;
-
 		cpu->rL = read_from_bus(memory, cpu->pc++);
 		cpu->rH = read_from_bus(memory, cpu->pc++);
 		break;
 	case 0x31:
 		// LD SP, n16
-		cpu->pc++;
-
 		cpu->sp = read_from_bus(memory, cpu->pc++) << 8;
 		cpu->sp |= read_from_bus(memory, cpu->pc++);
 		break;
 	case 0x32:
 		// LD [HL-], A
-		cpu->pc++;
-
 		uint16_t hl_val = bytes_to_u16(cpu->rL, cpu->rH);
 
 		write_to_bus(memory, hl_val, cpu->rA);
@@ -99,18 +111,14 @@ uint8_t next_instruction (sm83_ctx *cpu, uint8_t *memory) {
 		} else {
 			set_bit_u8(&cpu->rA, ZERO_FLAG, false);
 		}
-
-		cpu->pc++;
 		break;
 	case 0xC3:
 		// JP a16
-		cpu->pc = bytes_to_u16(*(memory + cpu->pc + 1), *(memory + cpu->pc + 2));
+		cpu->pc = bytes_to_u16(*(memory + cpu->pc), *(memory + cpu->pc + 1));
 		break;
 	case 0xDF:
 		// RST 0x18
-		cpu->pc++;
 		push_to_stack(cpu, memory, cpu->pc);
-
 		cpu->pc = 0x0018;
 		break;
 	default:
