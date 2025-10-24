@@ -33,6 +33,30 @@ void print_usage (const char *program_name) {
     exit(EXIT_SUCCESS);
 }
 
+void print_cpu_state (sm83_ctx *cpu) {
+    printf("\nPC: 0x%04X\n", cpu->pc);
+    printf("SP: 0x%04X\n", cpu->sp);
+
+    printf("A: %d\n", cpu->rA);
+    printf("B: %d\n", cpu->rB);
+    printf("C: %d\n", cpu->rC);
+    printf("D: %d\n", cpu->rD);
+    printf("E: %d\n", cpu->rE);
+    printf("H: %d\n", cpu->rH);
+    printf("L: %d\n", cpu->rL);
+    
+    printf("AF: %d\n", bytes_to_u16(cpu->rF, cpu->rA));
+    printf("BC: %d\n", bytes_to_u16(cpu->rC, cpu->rB));
+    printf("DE: %d\n", bytes_to_u16(cpu->rE, cpu->rD));
+    printf("HL: %d (0x%04X)\n", bytes_to_u16(cpu->rL, cpu->rH), bytes_to_u16(cpu->rL, cpu->rH));
+
+    printf("Zero Flag: %d\n", get_bit_u8(&cpu->rF, ZERO_FLAG));
+    printf("Subtraction Flag: %d\n", get_bit_u8(&cpu->rF, SUBTRACTION_FLAG));
+    printf("Half Carry Flag: %d\n", get_bit_u8(&cpu->rF, HALF_CARRY_FLAG));
+    printf("Carry Flag: %d\n\n", get_bit_u8(&cpu->rF, CARRY_FLAG));
+
+}
+
 int main (int argc, char *argv[]) {
     sm83_ctx cpu = {0};
     cartridge_header cart_h = {0};
@@ -65,8 +89,19 @@ int main (int argc, char *argv[]) {
 
     // Main Loop
     while (cpu.is_running) {
-        printf("Running opcode 0x%02X\n", next_instruction(&cpu, memory));
         //next_instruction(&cpu, memory);
+        printf("%04X: 0x%02X\n", cpu.pc, memory[cpu.pc]);
+        
+        while (true) {
+            char key = (char)getchar();
+
+            if (key == 'c') {
+                next_instruction(&cpu, memory);
+                break;
+            } else if (key == 'p') {
+                print_cpu_state(&cpu);
+            }
+        }
     }
 
     free(memory);

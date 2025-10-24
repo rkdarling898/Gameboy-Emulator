@@ -6,6 +6,10 @@
 #include <stdint.h>
 #include <string.h>
 
+uint8_t get_bit_u8 (uint8_t *target, uint8_t index) {
+    return (*target & (1 << index)) >> index;
+}
+
 void set_bit_u8 (uint8_t *target, uint8_t index, bool turn_bit_on) {
     if (index > 7) return;
 
