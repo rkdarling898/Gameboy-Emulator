@@ -60,6 +60,14 @@ void push_to_stack (sm83_ctx *cpu, uint8_t *memory, uint16_t data) {
 	write_to_bus(memory, cpu->sp, low_byte);
 }
 
+void jr_conditional (sm83_ctx *cpu, uint8_t *memory, uint8_t flag_index, uint8_t jump_if_value) {
+	int8_t address_offset = read_next_byte(cpu, memory);
+
+	if (get_bit_u8(&cpu->rF, flag_index) == jump_if_value) {
+		cpu->pc += address_offset;
+	}
+}
+
 uint8_t next_instruction (sm83_ctx *cpu, uint8_t *memory) {
 	uint8_t op_code = *(memory + cpu->pc);
 
@@ -96,17 +104,16 @@ uint8_t next_instruction (sm83_ctx *cpu, uint8_t *memory) {
 		break;
 	case 0x20:
 		// JR NZ, e8
-		int8_t address_offset;
-
-		if (get_bit_u8(&cpu->rF, ZERO_FLAG) == 0) {
-			address_offset = read_next_byte(cpu, memory);
-			cpu->pc += address_offset;
-		}
+		jr_conditional(cpu, memory, ZERO_FLAG, 0);
 		break;
 	case 0x21:
 		// LD HL, n16
 		cpu->rL = read_next_byte(cpu, memory);
 		cpu->rH = read_next_byte(cpu, memory);
+		break;
+	case 0x28:
+		// JR Z, e8
+		jr_conditional(cpu, memory, ZERO_FLAG, 1);
 		break;
 	case 0x31:
 		// LD SP, n16
@@ -126,6 +133,14 @@ uint8_t next_instruction (sm83_ctx *cpu, uint8_t *memory) {
 		cpu->rH = (uint8_t)(hl_val >> 8);
 		
 		break;
+	case 0x60:
+		// LD H, B
+		cpu->rH = cpu->rB;
+		break;
+	case 0x61:
+		// LD H, C
+		cpu->rH = cpu->rC;
+		break;
 	case 0xAF:
 		// XOR A, A (Clear accumulator)
 		cpu->rA ^= cpu->rA;
@@ -139,6 +154,16 @@ uint8_t next_instruction (sm83_ctx *cpu, uint8_t *memory) {
 		// RST 0x18
 		push_to_stack(cpu, memory, cpu->pc);
 		cpu->pc = 0x0018;
+		break;
+	case 0xFE:
+		// CP A, n8
+		uint8_t i_value = read_next_byte(cpu, memory);
+
+		set_bit_u8(&cpu->rF, ZERO_FLAG, (cpu->rA == i_value));
+		set_bit_u8(&cpu->rF, SUBTRACTION_FLAG, true);
+		set_bit_u8(&cpu->rF, HALF_CARRY_FLAG, ((cpu->rA & 0x0F) < (i_value & 0x0F)));
+		set_bit_u8(&cpu->rF, CARRY_FLAG, (cpu->rA < i_value));
+
 		break;
 	default:
 		cpu->is_running = false;
