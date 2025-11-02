@@ -68,6 +68,61 @@ void jr_conditional (sm83_ctx *cpu, uint8_t *memory, uint8_t flag_index, uint8_t
 	}
 }
 
+uint8_t alu_add (sm83_ctx *cpu, uint8_t a, uint8_t b) {
+	uint8_t result = a + b;
+
+	set_bit_u8(&cpu->rF, ZERO_FLAG, result == 0);
+	set_bit_u8(&cpu->rF, SUBTRACTION_FLAG, false);
+	set_bit_u8(&cpu->rF, HALF_CARRY_FLAG, (a & 0x0F) > (result & 0x0F));
+	set_bit_u8(&cpu->rF, CARRY_FLAG, a > result);
+
+	return result;
+}
+
+uint8_t alu_sub (sm83_ctx *cpu, uint8_t a, uint8_t b) {
+	uint8_t result = a - b;
+
+	set_bit_u8(&cpu->rF, ZERO_FLAG, result == 0);
+	set_bit_u8(&cpu->rF, SUBTRACTION_FLAG, true);
+	set_bit_u8(&cpu->rF, HALF_CARRY_FLAG, (a & 0x0F) < (result & 0x0F));
+	set_bit_u8(&cpu->rF, CARRY_FLAG, a < result);
+
+	return result;
+}
+
+uint8_t alu_and (sm83_ctx *cpu, uint8_t a, uint8_t b) {
+	uint8_t result = a & b;
+
+	set_bit_u8(&cpu->rF, ZERO_FLAG, result == 0);
+	set_bit_u8(&cpu->rF, SUBTRACTION_FLAG, false);
+	set_bit_u8(&cpu->rF, HALF_CARRY_FLAG, true);
+	set_bit_u8(&cpu->rF, CARRY_FLAG, false);
+
+	return result;
+}
+
+uint8_t alu_or (sm83_ctx *cpu, uint8_t a, uint8_t b) {
+	uint8_t result = a | b;
+
+	set_bit_u8(&cpu->rF, ZERO_FLAG, result == 0);
+	set_bit_u8(&cpu->rF, SUBTRACTION_FLAG, false);
+	set_bit_u8(&cpu->rF, HALF_CARRY_FLAG, false);
+	set_bit_u8(&cpu->rF, CARRY_FLAG, false);
+
+	return result;
+}
+
+uint8_t alu_xor (sm83_ctx *cpu, uint8_t a, uint8_t b) {
+	uint8_t result = a ^ b;
+
+	set_bit_u8(&cpu->rF, ZERO_FLAG, result == 0);
+	set_bit_u8(&cpu->rF, SUBTRACTION_FLAG, false);
+	set_bit_u8(&cpu->rF, HALF_CARRY_FLAG, false);
+	set_bit_u8(&cpu->rF, CARRY_FLAG, false);
+
+	return result;
+}
+
 uint8_t next_instruction (sm83_ctx *cpu, uint8_t *memory) {
 	uint8_t op_code = *(memory + cpu->pc);
 
@@ -376,10 +431,266 @@ uint8_t next_instruction (sm83_ctx *cpu, uint8_t *memory) {
 	case 0x7F:
 		// LD A, A
 		break;
+	case 0x80:
+		// ADD A, B
+		cpu->rA = alu_add(cpu, cpu->rA, cpu->rB);
+		break;
+	case 0x81:
+		// ADD A, C
+		cpu->rA = alu_add(cpu, cpu->rA, cpu->rC);
+		break;
+	case 0x82:
+		// ADD A, D
+		cpu->rA = alu_add(cpu, cpu->rA, cpu->rD);
+		break;
+	case 0x83:
+		// ADD A, E
+		cpu->rA = alu_add(cpu, cpu->rA, cpu->rE);
+		break;
+	case 0x84:
+		// ADD A, H
+		cpu->rA = alu_add(cpu, cpu->rA, cpu->rH);
+		break;
+	case 0x85:
+		// ADD A, L
+		cpu->rA = alu_add(cpu, cpu->rA, cpu->rL);
+		break;
+	case 0x86:
+		// ADD A, [HL]
+		cpu->rA = alu_add(cpu, cpu->rA, read_from_memory(memory, bytes_to_u16(cpu->rL, cpu->rH)));
+		break;
+	case 0x87:
+		// ADD A, A
+		cpu->rA = alu_add(cpu, cpu->rA, cpu->rA);
+		break;
+	case 0x88:
+		// ADC A, B
+		cpu->rA = alu_add(cpu, cpu->rA, cpu->rB + get_bit_u8(&cpu->rF, CARRY_FLAG));
+		break;
+	case 0x89:
+		// ADC A, C
+		cpu->rA = alu_add(cpu, cpu->rA, cpu->rC + get_bit_u8(&cpu->rF, CARRY_FLAG));
+		break;
+	case 0x8A:
+		// ADC A, D
+		cpu->rA = alu_add(cpu, cpu->rA, cpu->rD + get_bit_u8(&cpu->rF, CARRY_FLAG));
+		break;
+	case 0x8B:
+		// ADC A, E
+		cpu->rA = alu_add(cpu, cpu->rA, cpu->rE + get_bit_u8(&cpu->rF, CARRY_FLAG));
+		break;
+	case 0x8C:
+		// ADC A, H
+		cpu->rA = alu_add(cpu, cpu->rA, cpu->rH + get_bit_u8(&cpu->rF, CARRY_FLAG));
+		break;
+	case 0x8D:
+		// ADC A, L
+		cpu->rA = alu_add(cpu, cpu->rA, cpu->rL + get_bit_u8(&cpu->rF, CARRY_FLAG));
+		break;
+	case 0x8E:
+		// ADC A, [HL]
+		cpu->rA = alu_add(cpu, cpu->rA,
+			read_from_memory(memory, bytes_to_u16(cpu->rL, cpu->rH)) +
+			get_bit_u8(&cpu->rF, CARRY_FLAG));
+		break;
+	case 0x8F:
+		// ADC A, A
+		cpu->rA = alu_add(cpu, cpu->rA, cpu->rA + get_bit_u8(&cpu->rF, CARRY_FLAG));
+		break;
+	case 0x90:
+		// SUB A, B
+		cpu->rA = alu_sub(cpu, cpu->rA, cpu->rB);
+		break;
+	case 0x91:
+		// SUB A, C
+		cpu->rA = alu_sub(cpu, cpu->rA, cpu->rC);
+		break;
+	case 0x92:
+		// SUB A, D
+		cpu->rA = alu_sub(cpu, cpu->rA, cpu->rD);
+		break;
+	case 0x93:
+		// SUB A, E
+		cpu->rA = alu_sub(cpu, cpu->rA, cpu->rE);
+		break;
+	case 0x94:
+		// SUB A, H
+		cpu->rA = alu_sub(cpu, cpu->rA, cpu->rH);
+		break;
+	case 0x95:
+		// SUB A, L
+		cpu->rA = alu_sub(cpu, cpu->rA, cpu->rL);
+		break;
+	case 0x96:
+		// SUB A, [HL]
+		cpu->rA = alu_sub(cpu, cpu->rA,
+			read_from_memory(memory, read_from_memory(memory, bytes_to_u16(cpu->rL, cpu->rH))));
+		break;
+	case 0x97:
+		// SUB A, A
+		cpu->rA = alu_sub(cpu, cpu->rA, cpu->rA);
+		break;
+	case 0x98:
+		// SBC A, B (a - b - c = a - (b + c); Thank you distributive property)
+		cpu->rA = alu_sub(cpu, cpu->rA, cpu->rB + get_bit_u8(&cpu->rF, CARRY_FLAG));
+		break;
+	case 0x99:
+		// SBC A, C
+		cpu->rA = alu_sub(cpu, cpu->rA, cpu->rC + get_bit_u8(&cpu->rF, CARRY_FLAG));
+		break;
+	case 0x9A:
+		// SBC A, D
+		cpu->rA = alu_sub(cpu, cpu->rA, cpu->rD + get_bit_u8(&cpu->rF, CARRY_FLAG));
+		break;
+	case 0x9B:
+		// SBC A, E
+		cpu->rA = alu_sub(cpu, cpu->rA, cpu->rE + get_bit_u8(&cpu->rF, CARRY_FLAG));
+		break;
+	case 0x9C:
+		// SBC A, H
+		cpu->rA = alu_sub(cpu, cpu->rA, cpu->rH + get_bit_u8(&cpu->rF, CARRY_FLAG));
+		break;
+	case 0x9D:
+		// SBC A, L
+		cpu->rA = alu_sub(cpu, cpu->rA, cpu->rL + get_bit_u8(&cpu->rF, CARRY_FLAG));
+		break;
+	case 0x9E:
+		// SBC A, [HL]
+		cpu->rA = alu_sub(cpu, cpu->rA,
+			read_from_memory(memory, bytes_to_u16(cpu->rL, cpu->rH)) +
+			get_bit_u8(&cpu->rF, CARRY_FLAG));
+		break;
+	case 0x9F:
+		// SBC A, A
+		cpu->rA = alu_sub(cpu, cpu->rA, cpu->rA + get_bit_u8(&cpu->rF, CARRY_FLAG));
+		break;
+	case 0xA0:
+		// AND A, B
+		cpu->rA = alu_and(cpu, cpu->rA, cpu->rB);
+		break;
+	case 0xA1:
+		// AND A, C
+		cpu->rA = alu_and(cpu, cpu->rA, cpu->rC);
+		break;
+	case 0xA2:
+		// AND A, D
+		cpu->rA = alu_and(cpu, cpu->rA, cpu->rD);
+		break;
+	case 0xA3:
+		// AND A, E
+		cpu->rA = alu_and(cpu, cpu->rA, cpu->rE);
+		break;
+	case 0xA4:
+		// AND A, H
+		cpu->rA = alu_and(cpu, cpu->rA, cpu->rH);
+		break;
+	case 0xA5:
+		// AND A, L
+		cpu->rA = alu_and(cpu, cpu->rA, cpu->rL);
+		break;
+	case 0xA6:
+		// AND A, [HL]
+		cpu->rA = alu_and(cpu, cpu->rA, read_from_memory(memory, bytes_to_u16(cpu->rL, cpu->rH)));
+		break;
+	case 0xA7:
+		// AND A, A
+		cpu->rA = alu_and(cpu, cpu->rA, cpu->rB);
+		break;
+	case 0xA8:
+		// XOR A, B
+		cpu->rA = alu_xor(cpu, cpu->rA, cpu->rB);
+		break;
+	case 0xA9:
+		// XOR A, C
+		cpu->rA = alu_xor(cpu, cpu->rA, cpu->rC);
+		break;
+	case 0xAA:
+		// XOR A, D
+		cpu->rA = alu_xor(cpu, cpu->rA, cpu->rD);
+		break;
+	case 0xAB:
+		// XOR A, E
+		cpu->rA = alu_xor(cpu, cpu->rA, cpu->rE);
+		break;
+	case 0xAC:
+		// XOR A, H
+		cpu->rA = alu_xor(cpu, cpu->rA, cpu->rH);
+		break;
+	case 0xAD:
+		// XOR A, L
+		cpu->rA = alu_xor(cpu, cpu->rA, cpu->rL);
+		break;
+	case 0xAE:
+		// XOR A, [HL]
+		cpu->rA = alu_xor(cpu, cpu->rA, read_from_memory(memory, bytes_to_u16(cpu->rL, cpu->rH)));
+		break;
 	case 0xAF:
 		// XOR A, A (Clear accumulator)
-		cpu->rA ^= cpu->rA;
-		set_bit_u8(&cpu->rF, ZERO_FLAG, true);
+		cpu->rA = alu_xor(cpu, cpu->rA, cpu->rA);
+		break;
+	case 0xB0:
+		// OR A, B
+		cpu->rA = alu_or(cpu, cpu->rA, cpu->rB);
+		break;
+	case 0xB1:
+		// OR A, C
+		cpu->rA = alu_or(cpu, cpu->rA, cpu->rC);
+		break;
+	case 0xB2:
+		// OR A, D
+		cpu->rA = alu_or(cpu, cpu->rA, cpu->rD);
+		break;
+	case 0xB3:
+		// OR A, E
+		cpu->rA = alu_or(cpu, cpu->rA, cpu->rE);
+		break;
+	case 0xB4:
+		// OR A, H
+		cpu->rA = alu_or(cpu, cpu->rA, cpu->rH);
+		break;
+	case 0xB5:
+		// OR A, L
+		cpu->rA = alu_or(cpu, cpu->rA, cpu->rL);
+		break;
+	case 0xB6:
+		// OR A, [HL]
+		cpu->rA = alu_or(cpu, cpu->rA, read_from_memory(memory, bytes_to_u16(cpu->rL, cpu->rH)));
+		break;
+	case 0xB7:
+		// OR A, A
+		cpu->rA = alu_or(cpu, cpu->rA, cpu->rA);
+		break;
+	case 0xB8:
+		// CP A, B
+		alu_sub(cpu, cpu->rA, cpu->rB);
+		break;
+	case 0xB9:
+		// CP A, C
+		alu_sub(cpu, cpu->rA, cpu->rC);
+		break;
+	case 0xBA:
+		// CP A, D
+		alu_sub(cpu, cpu->rA, cpu->rD);
+		break;
+	case 0xBB:
+		// CP A, E
+		alu_sub(cpu, cpu->rA, cpu->rE);
+		break;
+	case 0xBC:
+		// CP A, H
+		alu_sub(cpu, cpu->rA, cpu->rH);
+		break;
+	case 0xBD:
+		// CP A, L
+		alu_sub(cpu, cpu->rA, cpu->rL);
+		break;
+	case 0xBE:
+		// CP A, [HL]
+		alu_sub(cpu, cpu->rA, read_from_memory(memory, bytes_to_u16(cpu->rL, cpu->rH)));
+		break;
+	case 0xBF:
+		// CP A, A
+		alu_sub(cpu, cpu->rA, cpu->rA);
 		break;
 	case 0xC3:
 		// JP a16
@@ -392,13 +703,7 @@ uint8_t next_instruction (sm83_ctx *cpu, uint8_t *memory) {
 		break;
 	case 0xFE:
 		// CP A, n8
-		uint8_t i_value = read_next_byte(cpu, memory);
-
-		set_bit_u8(&cpu->rF, ZERO_FLAG, (cpu->rA == i_value));
-		set_bit_u8(&cpu->rF, SUBTRACTION_FLAG, true);
-		set_bit_u8(&cpu->rF, HALF_CARRY_FLAG, ((cpu->rA & 0x0F) < (i_value & 0x0F)));
-		set_bit_u8(&cpu->rF, CARRY_FLAG, (cpu->rA < i_value));
-
+		alu_sub(cpu, cpu->rA, read_next_byte(cpu, memory));
 		break;
 	default:
 		cpu->is_running = false;
