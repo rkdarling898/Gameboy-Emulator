@@ -8,6 +8,7 @@
 #define ZERO_FLAG 7
 
 typedef struct {
+	uint8_t ime;
 	uint8_t rA;
 	uint8_t rB;
 	uint8_t rC;
@@ -18,6 +19,7 @@ typedef struct {
 	uint8_t rL;
 	uint16_t sp;
 	uint16_t pc;
+	bool is_halted;
 	bool is_running;
 } sm83_ctx;
 
@@ -33,13 +35,6 @@ uint8_t read_next_byte (sm83_ctx *cpu, uint8_t *memory) {
 	return nb;
 }
 
-uint16_t read_next_u16 (sm83_ctx *cpu, uint8_t *memory) {
-	return bytes_to_u16(
-		read_next_byte(cpu, memory),
-		read_next_byte(cpu, memory)
-	);
-}
-
 void write_to_memory (uint8_t *memory, uint16_t addr, uint8_t data) {
 	// This will also be worked on
 	*(memory + addr) = data;
@@ -49,22 +44,66 @@ void ld_next_byte (sm83_ctx *cpu, uint8_t *memory, uint8_t *dest) {
 	*dest = read_next_byte(cpu, memory);
 }
 
-void push_to_stack (sm83_ctx *cpu, uint8_t *memory, uint16_t data) {
-	uint8_t low_byte = (uint8_t)((data & 0xFF00) >> 8);
-	uint8_t high_byte = (uint8_t)(data & 0x00FF);
+void call_cc (sm83_ctx *cpu, uint8_t *memory, uint8_t flag_index, uint8_t call_if_value) {
+	uint8_t h_byte = read_next_byte(cpu, memory);
+	uint8_t l_byte = read_next_byte(cpu, memory);
 
-	cpu->sp--;
-	write_to_memory(memory, cpu->sp, high_byte);
+	if (get_bit_u8(&cpu->rF, flag_index) == call_if_value) {
+		cpu->sp--;
+		write_to_memory(memory, cpu->sp, h_byte);
 
-	cpu->sp--;
-	write_to_memory(memory, cpu->sp, low_byte);
+		cpu->sp--;
+		write_to_memory(memory, cpu->sp, l_byte);
+
+		cpu->pc = bytes_to_u16(l_byte, h_byte);
+	}
 }
 
-void jr_conditional (sm83_ctx *cpu, uint8_t *memory, uint8_t flag_index, uint8_t jump_if_value) {
+void pop_r16 (sm83_ctx *cpu, uint8_t *memory, uint8_t *h_reg, uint8_t *l_reg) {
+	*l_reg = read_from_memory(memory, cpu->sp++);
+	*h_reg = read_from_memory(memory, cpu->sp++);
+}
+
+void push_r16 (sm83_ctx *cpu, uint8_t *memory, uint8_t h_byte, uint8_t l_byte) {
+	cpu->sp--;
+	write_to_memory(memory, cpu->sp, h_byte);
+
+	cpu->sp--;
+	write_to_memory(memory, cpu->sp, l_byte);
+}
+
+void push_u16 (sm83_ctx *cpu, uint8_t *memory, uint16_t data) {
+	uint8_t l_byte = (uint8_t)((data & 0xFF00) >> 8);
+	uint8_t h_byte = (uint8_t)(data & 0x00FF);
+
+	cpu->sp--;
+	write_to_memory(memory, cpu->sp, h_byte);
+
+	cpu->sp--;
+	write_to_memory(memory, cpu->sp, l_byte);
+}
+
+void jp_cc (sm83_ctx *cpu, uint8_t *memory, uint8_t flag_index, uint8_t jump_if_value) {
+	uint16_t jp_address = bytes_to_u16(read_next_byte(cpu, memory), read_next_byte(cpu, memory));
+
+	if (get_bit_u8(&cpu->rF, flag_index) == jump_if_value) {
+		cpu->pc = jp_address;
+	}
+}
+
+void jr_cc (sm83_ctx *cpu, uint8_t *memory, uint8_t flag_index, uint8_t jump_if_value) {
 	int8_t address_offset = read_next_byte(cpu, memory);
 
 	if (get_bit_u8(&cpu->rF, flag_index) == jump_if_value) {
 		cpu->pc += address_offset;
+	}
+}
+
+void ret_cc (sm83_ctx *cpu, uint8_t *memory, uint8_t flag_index, uint8_t ret_if_value) {
+	if (get_bit_u8(&cpu->rF, flag_index) == ret_if_value) {
+		cpu->pc = bytes_to_u16(
+			read_from_memory(memory, cpu->sp++),
+			read_from_memory(memory, cpu->sp++));
 	}
 }
 
@@ -159,7 +198,7 @@ uint8_t next_instruction (sm83_ctx *cpu, uint8_t *memory) {
 		break;
 	case 0x20:
 		// JR NZ, e8
-		jr_conditional(cpu, memory, ZERO_FLAG, 0);
+		jr_cc(cpu, memory, ZERO_FLAG, 0);
 		break;
 	case 0x21:
 		// LD HL, n16
@@ -168,7 +207,7 @@ uint8_t next_instruction (sm83_ctx *cpu, uint8_t *memory) {
 		break;
 	case 0x28:
 		// JR Z, e8
-		jr_conditional(cpu, memory, ZERO_FLAG, 1);
+		jr_cc(cpu, memory, ZERO_FLAG, 1);
 		break;
 	case 0x31:
 		// LD SP, n16
@@ -395,7 +434,10 @@ uint8_t next_instruction (sm83_ctx *cpu, uint8_t *memory) {
 		// LD [HL], L
 		write_to_memory(memory, bytes_to_u16(cpu->rL, cpu->rH), cpu->rL);
 		break;
-	//case 0x76: HALT OP NOT IMPLEMENTED
+	case 0x76:
+		// HALT
+		cpu->is_halted = true;
+		break;
 	case 0x77:
 		// LD [HL], A
 		write_to_memory(memory, bytes_to_u16(cpu->rL, cpu->rH), cpu->rA);
@@ -692,18 +734,236 @@ uint8_t next_instruction (sm83_ctx *cpu, uint8_t *memory) {
 		// CP A, A
 		alu_sub(cpu, cpu->rA, cpu->rA);
 		break;
+	case 0xC0:
+		// RET NZ
+		ret_cc(cpu, memory, ZERO_FLAG, 0);
+		break;
+	case 0xC1:
+		// POP BC
+		pop_r16(cpu, memory, &cpu->rB, &cpu->rC);
+		break;
+	case 0xC2:
+		// JP NZ, a16
+		jp_cc(cpu, memory, ZERO_FLAG, 0);
+		break;
 	case 0xC3:
 		// JP a16
-		cpu->pc = read_next_u16(cpu, memory);
+		cpu->pc = bytes_to_u16(read_next_byte(cpu, memory), read_next_byte(cpu, memory));
+		break;
+	case 0xC4:
+		// CALL NZ, a16
+		call_cc(cpu, memory, ZERO_FLAG, 0);
+		break;
+	case 0xC5:
+		// PUSH BC
+		push_r16(cpu, memory, cpu->rB, cpu->rC);
+		break;
+	case 0xC6:
+		// ADD A, n8
+		cpu->rA = alu_add(cpu, cpu->rA, read_next_byte(cpu, memory));
+		break;
+	case 0xC7:
+		// RST $00
+		push_u16(cpu, memory, cpu->pc);
+		cpu->pc = 0x00;
+		break;
+	case 0xC8:
+		// RET Z
+		ret_cc(cpu, memory, ZERO_FLAG, 1);
+		break;
+	case 0xC9:
+		// RET
+		cpu->pc = bytes_to_u16(
+			read_from_memory(memory, cpu->sp++),
+			read_from_memory(memory, cpu->sp++));
+		break;
+	case 0xCA:
+		// JP Z, a16
+		jp_cc(cpu, memory, ZERO_FLAG, 1);
+		break;
+	case 0xCB:
+		// PREFIX (this is going to be another table of joy to work out later)
+		break;
+	case 0xCC:
+		// CALL Z, a16
+		call_cc(cpu, memory, ZERO_FLAG, 1);
+		break;
+	case 0xCD:
+		// CALL a16
+		uint8_t l_byte = read_next_byte(cpu, memory);
+		uint8_t h_byte = read_next_byte(cpu, memory);
+
+		cpu->sp--;
+		write_to_memory(memory, cpu->sp, l_byte);
+
+		cpu->sp--;
+		write_to_memory(memory, cpu->sp, h_byte);
+
+		cpu->pc = bytes_to_u16(l_byte, h_byte);
+		break;
+	case 0xCE:
+		// ADC A, n8
+		cpu->rA = alu_add(cpu, cpu->rA,
+			read_next_byte(cpu, memory) + get_bit_u8(&cpu->rF, CARRY_FLAG));
+		break;
+	case 0xCF:
+		// RST $08
+		push_u16(cpu, memory, cpu->pc);
+		cpu->pc = 0x08;
+		break;
+	case 0xD0:
+		// RET NC
+		ret_cc(cpu, memory, CARRY_FLAG, 0);
+		break;
+	case 0xD1:
+		// POP DE
+		pop_r16(cpu, memory, &cpu->rD, &cpu->rE);
+		break;
+	case 0xD2:
+		// JP NC, a16
+		jp_cc(cpu, memory, CARRY_FLAG, 0);
+		break;
+	case 0xD4:
+		// CALL NC, a16
+		call_cc(cpu, memory, CARRY_FLAG, 0);
+		break;
+	case 0xD5:
+		// PUSH DE
+		push_r16(cpu, memory, cpu->rD, cpu->rE);
+		break;
+	case 0xD6:
+		// SUB A, n8
+		cpu->rA = alu_sub(cpu, cpu->rA, read_next_byte(cpu, memory));
+		break;
+	case 0xD7:
+		// RST $10
+		push_u16(cpu, memory, cpu->pc);
+		cpu->pc = 0x10;
+		break;
+	case 0xD8:
+		// RET C
+		ret_cc(cpu, memory, CARRY_FLAG, 1);
+		break;
+	case 0xD9:
+		// RETI
+		cpu->pc = bytes_to_u16(
+			read_from_memory(memory, cpu->sp++),
+			read_from_memory(memory, cpu->sp++));
+		
+		cpu->ime = 1;
+		break;
+	case 0xDA:
+		// JP C, a16
+		jp_cc(cpu, memory, CARRY_FLAG, 1);
+		break;
+	case 0xDC:
+		// CALL C, a16
+		call_cc(cpu, memory, CARRY_FLAG, 1);
+		break;
+	case 0xDE:
+		// SBC A, n8
+		cpu->rA = alu_sub(cpu, 
+			cpu->rA, read_next_byte(cpu, memory) + get_bit_u8(&cpu->rF, CARRY_FLAG));
 		break;
 	case 0xDF:
-		// RST 0x18
-		push_to_stack(cpu, memory, cpu->pc);
-		cpu->pc = 0x0018;
+		// RST $18
+		push_u16(cpu, memory, cpu->pc);
+		cpu->pc = 0x18;
+		break;
+	case 0xE0:
+		// LDH [a8], A
+		write_to_memory(memory, bytes_to_u16(read_next_byte(cpu, memory), 0xFF), cpu->rA);
+		break;
+	case 0xE1:
+		// POP HL
+		pop_r16(cpu, memory, &cpu->rH, &cpu->rL);
+		break;
+	case 0xE2:
+		// LDH [C], A
+		write_to_memory(memory, bytes_to_u16(cpu->rC, 0xFF), cpu->rA);
+		break;
+	case 0xE5:
+		// PUSH HL
+		push_r16(cpu, memory, cpu->rH, cpu->rL);
+		break;
+	case 0xE6:
+		// AND A, n8
+		cpu->rA = alu_add(cpu, cpu->rA, read_next_byte(cpu, memory));
+		break;
+	case 0xE7:
+		// RST $20
+		push_u16(cpu, memory, cpu->pc);
+		cpu->pc = 0x20;
+		break;
+	// Can't wait to get to the chaos that is 0xE8
+	case 0xE9:
+		// JP HL
+		cpu->pc = bytes_to_u16(cpu->rL, cpu->rH);
+		break;
+	case 0xEA:
+		// LD [a16], A
+		write_to_memory(memory,
+			bytes_to_u16(read_next_byte(cpu, memory), read_next_byte(cpu, memory)), cpu->rA);
+		break;
+	case 0xEE:
+		// XOR A, n8
+		cpu->rA = alu_xor(cpu, cpu->rA, read_next_byte(cpu, memory));
+		break;
+	case 0xEF:
+		// RST $28
+		push_u16(cpu, memory, cpu->pc);
+		cpu->pc = 0x28;
+		break;
+	case 0xF0:
+		// LDH A, [a8]
+		cpu->rA = read_from_memory(memory, bytes_to_u16(read_next_byte(cpu, memory), 0xFF));
+		break;
+	case 0xF1:
+		// POP AF
+		pop_r16(cpu, memory, &cpu->rA, &cpu->rF);
+		break;
+	case 0xF2:
+		// LDH A, [C]
+		cpu->rA = read_from_memory(memory, bytes_to_u16(cpu->rC, 0xFF));
+		break;
+	case 0xF3:
+		// DI
+		cpu->ime = 0;
+		break;
+	case 0xF5:
+		// PUSH AF
+		push_r16(cpu, memory, cpu->rA, cpu->rF);
+		break;
+	case 0xF6:
+		// OR A, n8
+		cpu->rA = alu_or(cpu, cpu->rA, read_next_byte(cpu, memory));
+		break;
+	case 0xF7:
+		// RST $30
+		push_u16(cpu, memory, cpu->pc);
+		cpu->pc = 0x30;
+		break;
+	case 0xF9:
+		// LD SP, HL
+		cpu->sp = bytes_to_u16(cpu->rL, cpu->rH);
+		break;
+	case 0xFA:
+		// LD A, [a16]
+		cpu->rA = read_from_memory(memory,
+			bytes_to_u16(read_next_byte(cpu, memory), read_next_byte(cpu, memory)));
+		break;
+	case 0xFB:
+		// EI
+		cpu->ime = 1;
 		break;
 	case 0xFE:
 		// CP A, n8
 		alu_sub(cpu, cpu->rA, read_next_byte(cpu, memory));
+		break;
+	case 0xFF:
+		// RST $38
+		push_u16(cpu, memory, cpu->pc);
+		cpu->pc = 0x38;
 		break;
 	default:
 		cpu->is_running = false;
