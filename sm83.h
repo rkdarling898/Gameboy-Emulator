@@ -44,6 +44,11 @@ void ld_next_byte (sm83_ctx *cpu, uint8_t *memory, uint8_t *dest) {
 	*dest = read_next_byte(cpu, memory);
 }
 
+void ld_next_u16 (sm83_ctx *cpu, uint8_t *memory, uint8_t *low_b_addr, uint8_t *high_b_addr) {
+	*low_b_addr = read_next_byte(cpu, memory);
+	*high_b_addr = read_next_byte(cpu, memory);
+}
+
 void call_cc (sm83_ctx *cpu, uint8_t *memory, uint8_t flag_index, uint8_t call_if_value) {
 	uint8_t h_byte = read_next_byte(cpu, memory);
 	uint8_t l_byte = read_next_byte(cpu, memory);
@@ -95,7 +100,11 @@ void jr_cc (sm83_ctx *cpu, uint8_t *memory, uint8_t flag_index, uint8_t jump_if_
 	int8_t address_offset = read_next_byte(cpu, memory);
 
 	if (get_bit_u8(&cpu->rF, flag_index) == jump_if_value) {
-		cpu->pc += address_offset;
+		if (address_offset < 0) {
+			cpu->pc -= (address_offset * -1);
+		} else {
+			cpu->pc += address_offset;
+		}
 	}
 }
 
@@ -162,6 +171,51 @@ uint8_t alu_xor (sm83_ctx *cpu, uint8_t a, uint8_t b) {
 	return result;
 }
 
+void inc_reg (sm83_ctx *cpu, uint8_t *reg) {
+	uint8_t result = *reg + 1;
+
+	set_bit_u8(&cpu->rF, ZERO_FLAG, result == 0);
+	set_bit_u8(&cpu->rF, SUBTRACTION_FLAG, false);
+	set_bit_u8(&cpu->rF, HALF_CARRY_FLAG, (*reg & 0x0F) > (result & 0x0F));
+
+	*reg = result;
+}
+
+void dec_reg (sm83_ctx *cpu, uint8_t *reg) {
+	uint8_t result = *reg - 1;
+
+	set_bit_u8(&cpu->rF, ZERO_FLAG, result == 0);
+	set_bit_u8(&cpu->rF, SUBTRACTION_FLAG, true);
+	set_bit_u8(&cpu->rF, HALF_CARRY_FLAG, (*reg & 0x0F) < (result & 0x0F));
+
+	*reg = result;
+}
+
+void mod_u16_reg (uint8_t *low_reg, uint8_t *high_reg, int8_t value) {
+	uint16_t hl_val = bytes_to_u16(*low_reg, *high_reg) + value;
+
+	*low_reg = hl_val & 0x00FF;
+	*high_reg = (hl_val & 0xFF00) >> 8;
+}
+
+void mod_addr_in_hl (sm83_ctx *cpu, uint8_t *memory, int8_t value) {
+	uint8_t addr = bytes_to_u16(cpu->rL, cpu->rH);
+	uint8_t addr_val = read_from_memory(memory, addr);
+	uint8_t result = addr_val + value;
+
+	set_bit_u8(&cpu->rF, ZERO_FLAG, result == 0);
+
+	if (value < 0) {
+		set_bit_u8(&cpu->rF, SUBTRACTION_FLAG, true);
+		set_bit_u8(&cpu->rF, HALF_CARRY_FLAG, (addr_val & 0x0F) < (result & 0x0F));
+	} else {
+		set_bit_u8(&cpu->rF, SUBTRACTION_FLAG, false);
+		set_bit_u8(&cpu->rF, HALF_CARRY_FLAG, (addr_val & 0x0F) > (result & 0x0F));
+	}
+
+	write_to_memory(memory, addr, result);
+}
+
 uint8_t next_instruction (sm83_ctx *cpu, uint8_t *memory) {
 	uint8_t op_code = *(memory + cpu->pc);
 
@@ -171,30 +225,92 @@ uint8_t next_instruction (sm83_ctx *cpu, uint8_t *memory) {
 	case 0x00:
 		// NOP
 		break;
+	case 0x01:
+		// LD BC, n16
+		ld_next_u16(cpu, memory, &cpu->rC, &cpu->rB);
+		break;
+	case 0x02:
+		// LD [BC], A
+		write_to_memory(memory, bytes_to_u16(cpu->rC, cpu->rB), cpu->rA);
+		break;
+	case 0x03:
+		// INC BC
+		mod_u16_reg(&cpu->rC, &cpu->rB, 1);
+		break;
+	case 0x04:
+		// INC B
+		inc_reg(cpu, &cpu->rB);
+		break;
 	case 0x05:
 		// DEC B
-		set_bit_u8(&cpu->rF, SUBTRACTION_FLAG, true);
-
-		if (cpu->rB == 1) {
-			set_bit_u8(&cpu->rF, ZERO_FLAG, true);
-			set_bit_u8(&cpu->rF, HALF_CARRY_FLAG, false);
-		} else if (cpu->rB == 0) {
-			set_bit_u8(&cpu->rF, ZERO_FLAG, false);
-			set_bit_u8(&cpu->rF, HALF_CARRY_FLAG, true);
-		} else {
-			set_bit_u8(&cpu->rF, ZERO_FLAG, false);
-			set_bit_u8(&cpu->rF, HALF_CARRY_FLAG, false);
-		}
-
-		cpu->rB--;
+		dec_reg(cpu, &cpu->rD);
 		break;
 	case 0x06:
 		// LD B, n8
 		ld_next_byte(cpu, memory, &cpu->rB);
 		break;
+	case 0x07:
+		// TODO: refactor op codes using rotate
+		// RLCA
+		set_bit_u8(&cpu->rF, ZERO_FLAG, false);
+		set_bit_u8(&cpu->rF, SUBTRACTION_FLAG, false);
+		set_bit_u8(&cpu->rF, HALF_CARRY_FLAG, false);
+		set_bit_u8(&cpu->rF, CARRY_FLAG, (get_bit_u8(&cpu->rA, 7) == 1));
+		cpu->rA = cpu->rA << 1;
+		set_bit_u8(&cpu->rA, 7, (get_bit_u8(&cpu->rF, CARRY_FLAG) == 1));
+		break;
+	case 0x08:
+		// LD [a16], sp
+		uint16_t addr = bytes_to_u16(read_next_byte(cpu, memory), read_next_byte(cpu, memory));
+		write_to_memory(memory, addr, cpu->sp & 0x00FF);
+		write_to_memory(memory, addr + 1, (cpu->sp & 0xFF00) >> 8);
+		break;
 	case 0x0E:
 		// LD C, n8
 		ld_next_byte(cpu, memory, &cpu->rC);
+		break;
+	case 0x11:
+		// LD DE, n16
+		ld_next_u16(cpu, memory, &cpu->rE, &cpu->rD);
+		break;
+	case 0x12:
+		// LD [DE], A
+		write_to_memory(memory, bytes_to_u16(cpu->rE, cpu->rD), cpu->rA);
+		break;
+	case 0x13:
+		// INC DE
+		mod_u16_reg(&cpu->rE, &cpu->rD, 1);
+		break;
+	case 0x14:
+		// INC D
+		inc_reg(cpu, &cpu->rD);
+		break;
+	case 0x15:
+		// DEC D
+		dec_reg(cpu, &cpu->rD);
+		break;
+	case 0x16:
+		// LD D, n8
+		ld_next_byte(cpu, memory, &cpu->rD);
+		break;
+	case 0x17:
+		// RLA
+		set_bit_u8(&cpu->rF, ZERO_FLAG, false);
+		set_bit_u8(&cpu->rF, SUBTRACTION_FLAG, false);
+		set_bit_u8(&cpu->rF, HALF_CARRY_FLAG, false);
+		set_bit_u8(&cpu->rF, CARRY_FLAG, (get_bit_u8(&cpu->rA, 7) == 1));
+		cpu->rA = cpu->rA << 1;
+		set_bit_u8(&cpu->rA, 7, (get_bit_u8(&cpu->rF, CARRY_FLAG) == 1));
+		break;
+	case 0x18:
+		// JR e8
+		int8_t addr_offset = (int8_t)read_next_byte(cpu, memory);
+
+		if (addr_offset < 0) {
+			cpu->pc -= (addr_offset * -1);
+		} else {
+			cpu->pc += addr_offset;
+		}
 		break;
 	case 0x20:
 		// JR NZ, e8
@@ -202,8 +318,36 @@ uint8_t next_instruction (sm83_ctx *cpu, uint8_t *memory) {
 		break;
 	case 0x21:
 		// LD HL, n16
-		cpu->rL = read_next_byte(cpu, memory);
-		cpu->rH = read_next_byte(cpu, memory);
+		ld_next_u16(cpu, memory, &cpu->rL, &cpu->rH);
+		break;
+	case 0x22:
+		// LD [HL+], A
+		write_to_memory(memory, bytes_to_u16(cpu->rC, cpu->rB), cpu->rA);
+		mod_u16_reg(&cpu->rL, &cpu->rH, 1);
+		break;
+	case 0x23:
+		// INC HL
+		mod_u16_reg(&cpu->rL, &cpu->rH, 1);
+		break;
+	case 0x24:
+		// INC H
+		inc_reg(cpu, &cpu->rH);
+		break;
+	case 0x25:
+		// DEC H
+		dec_reg(cpu, &cpu->rH);
+		break;
+	case 0x26:
+		// LD H, n8
+		ld_next_byte(cpu, memory, &cpu->rH);
+		break;
+	case 0x27:
+		// DAA
+		uint8_t adjusted_val = cpu->rA;
+		if ((adjusted_val & 0xF) > 9) adjusted_val += 6;
+		if (((adjusted_val & 0xF0) >> 4) > 9) adjusted_val += 60;
+
+		cpu->rA = adjusted_val;
 		break;
 	case 0x28:
 		// JR Z, e8
@@ -215,15 +359,30 @@ uint8_t next_instruction (sm83_ctx *cpu, uint8_t *memory) {
 		break;
 	case 0x32:
 		// LD [HL-], A
-		uint16_t hl_val = bytes_to_u16(cpu->rL, cpu->rH);
-
-		// Write value of regA to address stored in regHL
-		write_to_memory(memory, hl_val, cpu->rA);
-
-		hl_val--;
-		
-		cpu->rL = (uint8_t)(hl_val & 0xFF);
-		cpu->rH = (uint8_t)(hl_val >> 8);
+		write_to_memory(memory, bytes_to_u16(cpu->rL, cpu->rH), cpu->rA);
+		mod_u16_reg(&cpu->rL, &cpu->rH, -1);
+		break;
+	case 0x33:
+		// INC SP
+		cpu->sp++;
+		break;
+	case 0x34:
+		// INC [HL]
+		mod_addr_in_hl(cpu, memory, 1);
+		break;
+	case 0x35:
+		// DEC [HL]
+		mod_addr_in_hl(cpu, memory, -1);
+		break;
+	case 0x36:
+		// LD [HL], n8
+		write_to_memory(memory, bytes_to_u16(cpu->rL, cpu->rH), read_next_byte(cpu, memory));
+		break;
+	case 0x37:
+		// SCF
+		set_bit_u8(&cpu->rF, SUBTRACTION_FLAG, false);
+		set_bit_u8(&cpu->rF, HALF_CARRY_FLAG, false);
+		set_bit_u8(&cpu->rF, CARRY_FLAG, true);
 		break;
 	case 0x40:
 		// LD B, B
