@@ -384,6 +384,10 @@ uint8_t next_instruction (sm83_ctx *cpu, uint8_t *memory) {
 		set_bit_u8(&cpu->rF, HALF_CARRY_FLAG, false);
 		set_bit_u8(&cpu->rF, CARRY_FLAG, true);
 		break;
+	case 0x38:
+		// JR C, e8
+		jr_cc(cpu, memory, CARRY_FLAG, 1);
+		break;
 	case 0x40:
 		// LD B, B
 		break;
